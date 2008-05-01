@@ -13,7 +13,7 @@ namespace YTech.WebControls.ContentRotator
 	/// </summary>
 	/// <example>
 	///     <![CDATA[
-	///     <%@ Register Assembly="YTech.General" Namespace="YTech.General.Web.Controls.ContentRotation" TagPrefix="CR" %>
+	///     <%@ Register Assembly="YTech.WebControls.ContentRotator" Namespace="YTech.WebControls.ContentRotator" TagPrefix="CR" %>
 	///     
 	///     <CR:ServerContentRotator runat="server" Key="Rotator1">
 	///         <CR:ContentPanel runat="server" Impressions="50" Key="Content1">
@@ -49,47 +49,13 @@ namespace YTech.WebControls.ContentRotator
 
 		private RotationModes _rotationMode = RotationModes.Random;
 		private string _key = null;
-		private ICookieDatasource _cookieDS;
 
 		private static readonly ILog _log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-		/// <summary>
-		///     Creates a new instance of the <see cref="ServerContentRotator" /> control.
-		/// </summary>
-		public ServerContentRotator()
-		{
-		}
-
-		/// <summary>
-		///     The method called when the page is loading.
-		/// </summary>
-		/// <param name="e"></param>
-		protected override void OnLoad(EventArgs e)
-		{
-			base.OnLoad(e);
-			_cookieDS = new CookieDatasource(Page.Request.Cookies, Page.Response.Cookies);
-		}
-
-		/// <summary>
-		///     Creates a new instance of the <see cref="ServerContentRotator" /> control.
-		/// </summary>
-		/// <remarks>
-		///     This constructor is primarily for unit testing.  It allows us to mock
-		///     the cookie reading and writing.
-		/// </remarks>
-		/// <param name="cookieDataSource">
-		///     The <see cref="ICookieDatasource"/> to use for reading and writing
-		///     persistant cookie values.
-		/// </param>
-		public ServerContentRotator(ICookieDatasource cookieDataSource)
-		{
-			_cookieDS = cookieDataSource;
-		}
-
-		/// <summary>
-		///     Gets or sets the key that will be used to uniquely identify
-		///     this content rotator.  Set this property when you wish to
-		///     track which content a particular user saw.
+		///	<summary>
+		///		Gets or sets the key that will be used to uniquely identify
+		///		this content rotator.  Set this property when you wish to
+		///		track which content a particular user saw.
 		/// </summary>
 		public string Key
 		{
@@ -118,301 +84,126 @@ namespace YTech.WebControls.ContentRotator
 			base.RenderChildren(writer);
 		}
 
-		/// <summary>
-		///     Determines which panel should be displayed, and displays it.
-		/// </summary>
-		/// <remarks>
-		///     This method is primarily a wrapper for the choosePanel
-		///     method.  It simply totals the number of impressions for all panels,
-		///     and then calls that method.
-		/// </remarks>
 		private void choosePanel()
 		{
-			ContentPanel cp;
-			int totalImpressions = 0;
-			List<ContentPanel> panels;
-			bool firstPanel;
+			List<ContentPanel> panels = getContentPanels();
+			Dictionary<string, int> itemWeights = new Dictionary<string, int>();
 
-			panels = new List<ContentPanel>();
-			firstPanel = true;
+			foreach(ContentPanel currPanel in panels)
+				itemWeights.Add(currPanel.Key, currPanel.Impressions);
+
+			string displayKey = ChooseKey(itemWeights, _rotationMode, getPreviousKey());
+			
+			_log.DebugFormat("Key '{0}' is being displayed", displayKey);
+
+			//display the chosen content panel
+			foreach(ContentPanel currPanel in panels)
+				currPanel.Visible = currPanel.Key == displayKey;
+
+			//Raise the content chosen event
+			ContentShownEventArgs args = new ContentShownEventArgs();
+			args.ShownPanel = getPanelByKey(panels, displayKey);
+			raiseContentShownEvent(this, args);
+
+			//Save the key value for next time
+			saveKey(displayKey);
+		}
+
+		private static ContentPanel getPanelByKey(IEnumerable<ContentPanel> panels, string key)
+		{
+			foreach (ContentPanel currPanel in panels)
+			{
+				if (currPanel.Key == key)
+					return currPanel;
+			}
+
+			return null;
+		}
+
+		private string getPreviousKey()
+		{
+			HttpCookie keyCookie = HttpContext.Current.Request.Cookies[_key + SAVED_CONTENT_KEY_COOKIE_POSTFIX];
+			if (keyCookie == null)
+				return null;
+			else
+				return keyCookie.Value;
+		}
+
+		private void saveKey(string key)
+		{
+			HttpCookie keyCookie = new HttpCookie(_key + SAVED_CONTENT_KEY_COOKIE_POSTFIX);
+			keyCookie.Value = key;
+			keyCookie.Expires = DateTime.Now.AddDays(10);
+
+			HttpContext.Current.Response.Cookies.Add(keyCookie);
+		}
+
+		private List<ContentPanel> getContentPanels()
+		{
+			List<ContentPanel> panels = new List<ContentPanel>();
 
 			foreach (Control currControl in Controls)
 			{
-				if (currControl.GetType() == typeof(ContentPanel))
-				{
-					cp = (ContentPanel)currControl;
-					cp.Visible = false; //Hide all the panels
-					totalImpressions += cp.Impressions;
-
-					//Check if this is the first panel that can actually
-					//get displayed.  One impression will be in position 0, so
-					//we need to take care of that here.
-					if (firstPanel && cp.Impressions > 0)
-					{
-						totalImpressions -= 1;
-						firstPanel = false;
-					}
-
-					panels.Add(cp);
-				}
+				if (currControl.GetType() == typeof (ContentPanel))
+					panels.Add((ContentPanel) currControl);
 			}
 
-			choosePanel(panels, totalImpressions);
+			return panels;
 		}
 
-		/// <summary>
-		///     Determines which panel should be displayed, and displays it.
-		/// </summary>
-		private void choosePanel(List<ContentPanel> panels, int totalImpressions)
+		public static T ChooseKey<T>(IDictionary<T, int> itemWeights)
 		{
-			int randomVal;
-			int impressionPointer;
-			ContentPanel chosenPanel = null;
-			bool previousPanelFound = false;
+			int totalImpressions = 0;
+			foreach (T currKey in itemWeights.Keys)
+				totalImpressions += itemWeights[currKey];
 
-			randomVal = getRandomValue(totalImpressions);
+			Random rand = new Random();
+			int targetPosition = rand.Next(0, totalImpressions - 1);
 
-			if (_rotationMode == RotationModes.AlwaysSame)
+			int position = 0;
+			foreach(T currKey in itemWeights.Keys)
 			{
-				if (_key == null)
-				{
-					_log.Warn("The content rotator can't always show the same content if a key isn't specified");
-				}
-				else
-				{
-					//Check if there is a cookie containing the previous panel
-					string savedKey = GetSavedContentKey(_key);
-					if (!string.IsNullOrEmpty(savedKey))
-						panelChosen(panels, savedKey, out previousPanelFound);
+				int min = position;
+				int max = position + itemWeights[currKey];
 
-					if (previousPanelFound)
-						return;
-				}
+				if (targetPosition >= min && targetPosition < max)
+					return currKey;
+
+				position += itemWeights[currKey];
 			}
 
-			impressionPointer = 0;
-			foreach (ContentPanel currPanel in panels)
+			//This should never happen, but we put it here to avoid warnings
+			return default(T);
+		}
+
+		public static T ChooseKey<T>(IDictionary<T, int> itemWeights, RotationModes rotationMode, T previousKey)
+		{
+			if (rotationMode == RotationModes.AlwaysSame)
 			{
-				//See if the random value occurs in the range of the current panel
-				if (randomVal >= impressionPointer && randomVal < impressionPointer + currPanel.Impressions)
+				if ((object)previousKey != null)
 				{
-					chosenPanel = currPanel;
-					break;
+					//This is easy
+					return previousKey;
 				}
-
-				impressionPointer += currPanel.Impressions;
 			}
-
-			if (chosenPanel != null)
-				panelChosen(chosenPanel);
-		}
-
-		#region Cookie reading/writing methods
-
-		/// <summary>
-		///     Gets the name of the cookie that this content rotator
-		///     will use to store the display content key.
-		/// </summary>
-		/// <returns>
-		///     The name of the cookie. Note that the cookie may NOT exist.
-		/// </returns>
-		public string GetCookieName()
-		{
-			return getCookieName(_key);
-		}
-
-		/// <summary>
-		///     Gets the name of the cookie that stores the content key
-		///     for the rotator whose key is specified.
-		/// </summary>
-		/// <param name="rotatorKey">
-		///     The key of any content rotator.
-		/// </param>
-		/// <returns>
-		///     The name of the cookie. Note that the cookie may NOT exist.
-		/// </returns>
-		private static string getCookieName(string rotatorKey)
-		{
-			return rotatorKey + SAVED_CONTENT_KEY_COOKIE_POSTFIX;
-		}
-
-		/// <summary>
-		///     Gets the key for the content that was displayed by the content
-		///     rotator with the specified rotator key.
-		/// </summary>
-		/// <remarks>
-		///     Basically, you will use this method if you want to know which content
-		///     section was displayed to a particular user.  For example, you would use
-		///     this if you were doing A/B testing, and wanted to know which version of the
-		///     content the current user saw.
-		/// </remarks>
-		/// <param name="requestCookies">
-		///     The request cookies for the current request where the content
-		///     key will attempt to be read from.
-		/// </param>
-		/// <param name="contentRotatorKey">
-		///     The key of the content rotator to get the displayed content key for.
-		/// </param>
-		/// <returns></returns>
-		public static string GetSavedContentKey(HttpCookieCollection requestCookies, string contentRotatorKey)
-		{
-			ICookieDatasource cookieDS;
-
-			cookieDS = new CookieDatasource(requestCookies, null);
-			return cookieDS.ReadValue(getCookieName(contentRotatorKey));
-		}
-
-		/// <summary>
-		///     Gets all of the rotator key/content key combinations stored in
-		///     the specified cookie collection.
-		/// </summary>
-		/// <returns></returns>
-		public static Dictionary<string, string> GetSavedContentKeys(HttpCookieCollection cookies)
-		{
-			int suffixLength;
-			Dictionary<string, string> keyPairs;
-
-			suffixLength = SAVED_CONTENT_KEY_COOKIE_POSTFIX.Length;
-			keyPairs = new Dictionary<string, string>();
-
-			foreach (string currCookieName in cookies.AllKeys)
+			else if (rotationMode == RotationModes.AlwaysDifferent)
 			{
-				if (currCookieName.EndsWith(SAVED_CONTENT_KEY_COOKIE_POSTFIX))
+				if ((object)previousKey != null)
 				{
-					string rotatorKey = currCookieName.Substring(0, currCookieName.Length - suffixLength);
-					string contentKey = cookies[currCookieName].Value;
-
-					keyPairs.Add(rotatorKey, contentKey);
+					//Allow any key except the previous
+					itemWeights.Remove(previousKey);
 				}
 			}
 
-			return keyPairs;
-		}
-
-		/// <summary>
-		///     Gets the key for the content that was displayed by the content
-		///     rotator with the specified rotator key.
-		/// </summary>
-		/// <remarks>
-		///     Basically, you will use this method if you want to know which content
-		///     section was displayed to a particular user.  For example, you would use
-		///     this if you were doing A/B testing, and wanted to know which version of the
-		///     content the current user saw.
-		/// </remarks>
-		/// <param name="contentRotatorKey">
-		///     The key of the content rotator to get the displayed content key for.
-		/// </param>
-		/// <returns></returns>
-		public string GetSavedContentKey(string contentRotatorKey)
-		{
-			//If we don't have a key ourselves, we can't look up the content key
-			if (string.IsNullOrEmpty(contentRotatorKey))
-				return null;
-
-			return _cookieDS.ReadValue(getCookieName(contentRotatorKey));
-		}
-
-		/// <summary>
-		///     Saves the specified key to a cookie so that it can
-		///     be retrieved for this user later.
-		/// </summary>
-		/// <param name="contentKey">
-		///     The unique key of a particular content section.  This would
-		///     be the key of the currently displayed content.
-		/// </param>
-		private void saveContentKey(string contentKey)
-		{
-			_cookieDS.WriteValue(GetCookieName(), contentKey);
-		}
-
-		#endregion
-
-		/// <summary>
-		///     Looks though the panels for one that has the specified key
-		///     and displays that panel.
-		/// </summary>
-		private void panelChosen(ContentPanel chosenPanel)
-		{
-			ContentShownEventArgs args;
-
-			chosenPanel.Visible = true;
-
-			args = new ContentShownEventArgs();
-			args.ShownPanel = chosenPanel;
-
-			raiseContentShownEvent(this, args);
-
-			if (!string.IsNullOrEmpty(_key) && !string.IsNullOrEmpty(chosenPanel.Key))
-				saveContentKey(chosenPanel.Key);
-		}
-
-		/// <summary>
-		///     Looks though a panel collection for one that has the specified key
-		///     and displays that panel.
-		/// </summary>
-		/// <param name="panels">
-		///     The panel collection to look for a panel witht the specified
-		///     content key.
-		/// </param>
-		/// <param name="contentKey">
-		///     The key to look for in the panel collection.
-		/// </param>
-		/// <param name="panelFound">
-		///     Returns a boolean indicating whether or not the panel was found
-		///     and selected to be displayed.  This could be false if an invalid
-		///     or old contentKey was supplied.
-		/// </param>
-		private void panelChosen(IEnumerable<ContentPanel> panels, string contentKey, out bool panelFound)
-		{
-			if (string.IsNullOrEmpty(contentKey))
-			{
-				panelFound = false;
-				return;
-			}
-
-			foreach (ContentPanel currContent in panels)
-			{
-				if (currContent.Key == contentKey)
-				{
-					panelFound = true;
-					panelChosen(currContent);
-					return;
-				}
-			}
-
-			panelFound = false;
+			return ChooseKey(itemWeights);
 		}
 
 		private void raiseContentShownEvent(object s, ContentShownEventArgs args)
 		{
-			ContentShownDelegate evt;
-
-			evt = ContentShown;
+			ContentShownDelegate evt = ContentShown;
 
 			if (evt != null)
 				evt(s, args);
-		}
-
-		/// <summary>
-		///     Gets a random number lower than the one specified.
-		/// </summary>
-		/// <remarks>
-		///     This method is fairly pointless now, because .NET 2.0 has
-		///     a method that makes it easy to get a number within a specified
-		///     range.
-		/// </remarks>
-		/// <param name="totalImpressions">
-		///     The maxiumum random value allowed.
-		/// </param>
-		/// <returns>
-		///     A random number between 0 and totalImpressions
-		/// </returns>
-		private static int getRandomValue(int totalImpressions)
-		{
-			Random rand;
-
-			rand = new Random();
-			return rand.Next(0, totalImpressions + 1);
 		}
 	}
 }
