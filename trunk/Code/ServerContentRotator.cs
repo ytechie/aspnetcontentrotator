@@ -201,5 +201,15 @@ namespace YTech.WebControls.ContentRotator
 			if (evt != null)
 				evt(s, args);
 		}
+
+		public override void RenderBeginTag(HtmlTextWriter writer)
+		{
+			//We don't want a start tag, we only want the content
+		}
+
+		public override void RenderEndTag(HtmlTextWriter writer)
+		{
+			//We don't want an end tag, we only want the content
+		}
 	}
 }
