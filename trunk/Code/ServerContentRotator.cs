@@ -1,10 +1,8 @@
 using System;
-using System.Reflection;
 using System.Collections.Generic;
 using System.Web;
 using System.Web.UI;
 using System.Web.UI.WebControls;
-using log4net;
 
 namespace YTech.WebControls.ContentRotator
 {
@@ -50,8 +48,6 @@ namespace YTech.WebControls.ContentRotator
 		private RotationModes _rotationMode = RotationModes.Random;
 		private string _key = null;
 
-		private static readonly ILog _log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
-
 		///	<summary>
 		///		Gets or sets the key that will be used to uniquely identify
 		///		this content rotator.  Set this property when you wish to
@@ -94,7 +90,7 @@ namespace YTech.WebControls.ContentRotator
 
 			string displayKey = ChooseKey(itemWeights, _rotationMode, getPreviousKey());
 			
-			_log.DebugFormat("Key '{0}' is being displayed", displayKey);
+			//_log.DebugFormat("Key '{0}' is being displayed", displayKey);
 
 			//display the chosen content panel
 			foreach(ContentPanel currPanel in panels)
