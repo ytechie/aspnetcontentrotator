@@ -31,5 +31,16 @@ namespace YTech.WebControls.ContentRotator
 			get { return _key; }
 			set { _key = value; }
 		}
+
+		public override void RenderBeginTag(System.Web.UI.HtmlTextWriter writer)
+		{
+			//writer.Write("test");
+			//We don't want a start tag, we only want the content
+		}
+
+		public override void RenderEndTag(System.Web.UI.HtmlTextWriter writer)
+		{
+			//We don't want an end tag, we only want the content
+		}
 	}
 }
